@@ -13,6 +13,7 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import androidx.core.app.NotificationCompat
+import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.Executors
@@ -25,6 +26,7 @@ import java.util.concurrent.Executors
  * 3. On the first down result only, sends Termux RUN_COMMAND intent running `ai wake`.
  *    Until a poll succeeds, notification text becomes "engine asleep · tap to open".
  * 4. Stop action in notification stops the service.
+ * 5. While engine is UP, also polls http://127.0.0.1:<port>/api/jobs to notify on job completion.
  */
 class EngineService : Service() {
 
@@ -34,6 +36,9 @@ class EngineService : Service() {
 
     private var hasSentWakeOnDown = false
     private var isPolling = false
+
+    private val knownJobStates = mutableMapOf<Int, String>()
+    private var isFirstJobsPoll = true
 
     private val pollRunnable = object : Runnable {
         override fun run() {
@@ -47,7 +52,7 @@ class EngineService : Service() {
     override fun onCreate() {
         super.onCreate()
         tokenStore = TokenStore(this)
-        createNotificationChannel()
+        createNotificationChannels()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -124,9 +129,11 @@ class EngineService : Service() {
             .build()
     }
 
-    private fun createNotificationChannel() {
+    private fun createNotificationChannels() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
+            val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
+            val serviceChannel = NotificationChannel(
                 CHANNEL_ID,
                 "Aasmaan Engine",
                 NotificationManager.IMPORTANCE_LOW
@@ -134,8 +141,16 @@ class EngineService : Service() {
                 description = "Keeps local Aasmaan engine reachable on 127.0.0.1"
                 setShowBadge(false)
             }
-            val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            manager.createNotificationChannel(channel)
+            manager.createNotificationChannel(serviceChannel)
+
+            val jobsChannel = NotificationChannel(
+                JOBS_CHANNEL_ID,
+                "Aasmaan jobs",
+                NotificationManager.IMPORTANCE_DEFAULT
+            ).apply {
+                description = "Notifications for completed Aasmaan background jobs"
+            }
+            manager.createNotificationChannel(jobsChannel)
         }
     }
 
@@ -176,7 +191,102 @@ class EngineService : Service() {
                     }
                 }
             }
+
+            // If the engine is UP, check /api/jobs within the same background execution
+            if (isUp) {
+                pollJobs(port, token)
+            }
         }
+    }
+
+    private fun pollJobs(port: Int, token: String) {
+        var jobsConn: HttpURLConnection? = null
+        try {
+            val jobsUrl = URL("http://127.0.0.1:$port/api/jobs")
+            jobsConn = (jobsUrl.openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = 5000
+                readTimeout = 5000
+                if (token.isNotBlank()) {
+                    setRequestProperty("Authorization", "Bearer $token")
+                }
+            }
+
+            if (jobsConn.responseCode in 200..299) {
+                val body = jobsConn.inputStream.bufferedReader().use { it.readText() }
+                val json = JSONObject(body)
+                val jobsArray = json.optJSONArray("jobs")
+                if (jobsArray != null) {
+                    val currentIds = mutableSetOf<Int>()
+                    val notificationsToSend = mutableListOf<Triple<Int, String, String>>()
+
+                    for (i in 0 until jobsArray.length()) {
+                        val jobObj = jobsArray.optJSONObject(i) ?: continue
+                        val id = jobObj.optInt("id", -1)
+                        if (id < 0) continue
+                        currentIds.add(id)
+
+                        val label = jobObj.optString("label", "")
+                        val state = jobObj.optString("state", "")
+
+                        if (!isFirstJobsPoll) {
+                            val oldState = knownJobStates[id]
+                            if (oldState != "done" && state == "done") {
+                                notificationsToSend.add(Triple(id, "Job #$id done", label))
+                            } else if (oldState != "failed" && state == "failed") {
+                                notificationsToSend.add(Triple(id, "Job #$id failed", label))
+                            }
+                        }
+
+                        knownJobStates[id] = state
+                    }
+
+                    if (isFirstJobsPoll) {
+                        isFirstJobsPoll = false
+                    }
+
+                    if (knownJobStates.size > 50) {
+                        knownJobStates.keys.retainAll(currentIds)
+                    }
+
+                    if (notificationsToSend.isNotEmpty()) {
+                        mainHandler.post {
+                            for ((id, title, label) in notificationsToSend) {
+                                showJobNotification(id, title, label)
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (_: Exception) {
+            // Silently skip if request fails or returns non-2xx; does not affect status
+        } finally {
+            jobsConn?.disconnect()
+        }
+    }
+
+    private fun showJobNotification(jobId: Int, title: String, label: String) {
+        val openIntent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        val contentPendingIntent = PendingIntent.getActivity(
+            this,
+            2000 + jobId,
+            openIntent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
+        val notification = NotificationCompat.Builder(this, JOBS_CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_terminal)
+            .setContentTitle(title)
+            .setContentText(label)
+            .setAutoCancel(true)
+            .setContentIntent(contentPendingIntent)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .build()
+
+        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        manager.notify(2000 + jobId, notification)
     }
 
     private fun stopEngineService() {
@@ -195,6 +305,8 @@ class EngineService : Service() {
         isPolling = false
         mainHandler.removeCallbacks(pollRunnable)
         executor.shutdown()
+        knownJobStates.clear()
+        isFirstJobsPoll = true
         super.onDestroy()
     }
 
@@ -202,6 +314,7 @@ class EngineService : Service() {
 
     companion object {
         const val CHANNEL_ID = "engine_service_channel"
+        const val JOBS_CHANNEL_ID = "jobs"
         const val NOTIFICATION_ID = 1001
         const val ACTION_STOP = "in.aasmaan.puppetmaster.ACTION_STOP_ENGINE"
         const val POLL_INTERVAL_MS = 30_000L
