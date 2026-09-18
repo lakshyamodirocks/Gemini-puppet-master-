@@ -2,13 +2,21 @@ package `in`.aasmaan.puppetmaster
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
+import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.text.InputType
+import android.view.Gravity
+import android.view.View
+import android.view.ViewGroup
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
@@ -17,683 +25,638 @@ import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import androidx.activity.ComponentActivity
-import androidx.activity.compose.BackHandler
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.compose.setContent
+import android.widget.Button
+import android.widget.EditText
+import android.widget.FrameLayout
+import android.widget.ImageButton
+import android.widget.ImageView
+import android.widget.LinearLayout
+import android.widget.ProgressBar
+import android.widget.ScrollView
+import android.widget.TextView
+import android.widget.Toast
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Terminal
-import androidx.compose.material.icons.filled.Visibility
-import androidx.compose.material.icons.filled.VisibilityOff
-import androidx.compose.material.icons.filled.Warning
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.input.VisualTransformation
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import androidx.compose.ui.viewinterop.AndroidView
+import androidx.appcompat.app.AlertDialog
+import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
-import kotlinx.coroutines.launch
 
-private val DarkBackground = Color(0xFF0B0E14)
-private val DarkCard = Color(0xFF151A24)
-private val DarkLine = Color(0xFF232A38)
-private val DarkInk = Color(0xFFE6EDF6)
-private val DarkDim = Color(0xFF8B97A8)
-private val DarkAcc = Color(0xFF6EA8FE)
-private val DarkOk = Color(0xFF3FB950)
-private val DarkWarn = Color(0xFFD29922)
-private val DarkBad = Color(0xFFF85149)
-
-class MainActivity : ComponentActivity() {
+class MainActivity : AppCompatActivity() {
 
     private lateinit var tokenStore: TokenStore
-    private var webViewInstance: WebView? = null
+    private var webView: WebView? = null
+    private var progressBar: ProgressBar? = null
+    private var offlineView: View? = null
+    private var statusDot: View? = null
+    private var statusSubtitle: TextView? = null
+
     private var fileUploadCallback: ValueCallback<Array<Uri>>? = null
     private val mainHandler = Handler(Looper.getMainLooper())
+    private var hasStartedService = false
+
+    private val notificationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { _ ->
+        doStartEngineService()
+    }
+
+    private val cameraPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { _ -> }
+
+    private val fileChooserLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (fileUploadCallback == null) return@registerForActivityResult
+        val results: Array<Uri>? = if (result.resultCode == RESULT_OK && result.data != null) {
+            val data = result.data
+            val clipData = data?.clipData
+            when {
+                clipData != null -> Array(clipData.itemCount) { i -> clipData.getItemAt(i).uri }
+                data?.data != null -> arrayOf(data.data!!)
+                else -> null
+            }
+        } else {
+            null
+        }
+        fileUploadCallback?.onReceiveValue(results)
+        fileUploadCallback = null
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         tokenStore = TokenStore(this)
 
-        setContent {
-            PuppetMasterApp()
+        setContentView(buildContentView())
+
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                val wv = webView
+                if (wv != null && wv.canGoBack() && offlineView?.visibility != View.VISIBLE) {
+                    wv.goBack()
+                } else {
+                    finish()
+                }
+            }
+        })
+
+        reloadEngine()
+    }
+
+    private fun buildContentView(): View {
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(Color.parseColor("#0B0E14"))
+            layoutParams = ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
+        }
+
+        // 1. Top Header Bar
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dpToPx(16), dpToPx(10), dpToPx(16), dpToPx(10))
+            setBackgroundColor(Color.parseColor("#0B0E14"))
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+        }
+
+        val titleContainer = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f)
+        }
+
+        val titleText = TextView(this).apply {
+            text = "✦ Puppet Master"
+            textSize = 17f
+            setTextColor(Color.parseColor("#E6EDF6"))
+            paint.isFakeBoldText = true
+        }
+
+        val statusRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dpToPx(2), 0, 0)
+        }
+
+        statusDot = View(this).apply {
+            layoutParams = LinearLayout.LayoutParams(dpToPx(7), dpToPx(7))
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(Color.parseColor("#D29922"))
+            }
+        }
+
+        statusSubtitle = TextView(this).apply {
+            text = "127.0.0.1:${tokenStore.port} (Connecting…)"
+            textSize = 12f
+            setTextColor(Color.parseColor("#8B97A8"))
+            setPadding(dpToPx(6), 0, 0, 0)
+        }
+
+        statusRow.addView(statusDot)
+        statusRow.addView(statusSubtitle)
+
+        titleContainer.addView(titleText)
+        titleContainer.addView(statusRow)
+        header.addView(titleContainer)
+
+        // Action Icons: Refresh, Board, Termux, Settings
+        val btnRefresh = createActionButton(R.drawable.ic_refresh, "Refresh") {
+            reloadEngine()
+        }
+        val btnBoard = createActionButton(R.drawable.ic_terminal, "Board") {
+            reloadEngine("/board")
+        }
+        val btnTermux = createActionButton(R.drawable.ic_terminal, "Start Termux") {
+            handleStartTermux()
+        }
+        val btnSettings = createActionButton(R.drawable.ic_settings, "Settings") {
+            showConfigDialog()
+        }
+
+        header.addView(btnRefresh)
+        header.addView(btnBoard)
+        header.addView(btnTermux)
+        header.addView(btnSettings)
+        root.addView(header)
+
+        // 2. Loading Progress Bar
+        progressBar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                dpToPx(3)
+            )
+            isIndeterminate = false
+            max = 100
+            progress = 0
+            visibility = View.GONE
+        }
+        root.addView(progressBar)
+
+        // 3. Web & Offline Container
+        val frameContainer = FrameLayout(this).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                0,
+                1.0f
+            )
+        }
+
+        // WebView
+        val wv = WebView(this).apply {
+            setBackgroundColor(Color.parseColor("#0B0E14"))
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            )
+        }
+        setupWebView(wv)
+        this.webView = wv
+        frameContainer.addView(wv)
+
+        // Offline Error View
+        val offline = buildOfflineView()
+        offline.visibility = View.GONE
+        this.offlineView = offline
+        frameContainer.addView(offline)
+
+        root.addView(frameContainer)
+        return root
+    }
+
+    private fun createActionButton(iconRes: Int, contentDesc: String, onClick: () -> Unit): ImageButton {
+        return ImageButton(this).apply {
+            setImageResource(iconRes)
+            contentDescription = contentDesc
+            setBackgroundColor(Color.TRANSPARENT)
+            setColorFilter(Color.parseColor("#E6EDF6"))
+            setPadding(dpToPx(8), dpToPx(8), dpToPx(8), dpToPx(8))
+            layoutParams = LinearLayout.LayoutParams(dpToPx(40), dpToPx(40))
+            setOnClickListener { onClick() }
         }
     }
 
-    @OptIn(ExperimentalMaterial3Api::class)
-    @Composable
-    private fun PuppetMasterApp() {
-        val context = LocalContext.current
-        val coroutineScope = rememberCoroutineScope()
-        val snackbarHostState = remember { SnackbarHostState() }
+    @SuppressLint("SetJavaScriptEnabled")
+    private fun setupWebView(wv: WebView) {
+        wv.settings.apply {
+            javaScriptEnabled = true
+            domStorageEnabled = true
+            databaseEnabled = true
+            allowFileAccess = false
+            allowContentAccess = true
+            mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+            cacheMode = WebSettings.LOAD_DEFAULT
+            loadWithOverviewMode = true
+            useWideViewPort = true
+        }
 
-        var currentPort by remember { mutableIntStateOf(tokenStore.port) }
-        var hasToken by remember { mutableStateOf(tokenStore.hasToken()) }
-        var connectionStatus by remember { mutableStateOf(ConnectionStatus.CONNECTING) }
-        var pageProgress by remember { mutableIntStateOf(0) }
-        var showConfigDialog by remember { mutableStateOf(false) }
-
-        // Camera permission launcher for photo capture in web file chooser
-        val cameraPermissionLauncher = rememberLauncherForActivityResult(
-            contract = ActivityResultContracts.RequestPermission()
-        ) { _ -> }
-
-        // File chooser launcher
-        val fileChooserLauncher = rememberLauncherForActivityResult(
-            contract = ActivityResultContracts.StartActivityForResult()
-        ) { result ->
-            if (fileUploadCallback == null) return@rememberLauncherForActivityResult
-            val results: Array<Uri>? = if (result.resultCode == RESULT_OK && result.data != null) {
-                val data = result.data
-                val clipData = data?.clipData
-                when {
-                    clipData != null -> Array(clipData.itemCount) { i -> clipData.getItemAt(i).uri }
-                    data?.data != null -> arrayOf(data.data!!)
-                    else -> null
+        wv.webViewClient = object : WebViewClient() {
+            override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                val uri = request?.url ?: return false
+                if (LoopbackGuard.isLoopback(uri)) {
+                    return false
                 }
-            } else {
-                null
+                // External link refused: launch in external browser
+                try {
+                    val extIntent = Intent(Intent.ACTION_VIEW, uri).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    startActivity(extIntent)
+                    Toast.makeText(this@MainActivity, "Opening external link in browser", Toast.LENGTH_SHORT).show()
+                } catch (_: Exception) {}
+                return true
             }
-            fileUploadCallback?.onReceiveValue(results)
-            fileUploadCallback = null
-        }
 
-        // Handle hardware back press
-        BackHandler {
-            if (webViewInstance?.canGoBack() == true && connectionStatus == ConnectionStatus.CONNECTED) {
-                webViewInstance?.goBack()
-            } else {
-                finish()
+            override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+                super.onPageStarted(view, url, favicon)
+                progressBar?.visibility = View.VISIBLE
+                updateStatus(ConnectionStatus.CONNECTING)
             }
-        }
 
-        fun reloadEngine(path: String = "/") {
-            connectionStatus = ConnectionStatus.CONNECTING
-            pageProgress = 10
-            val targetUrl = LoopbackGuard.buildLoopbackUrl(currentPort, path, tokenStore.token)
-            val authHeaders = LoopbackGuard.getAuthHeaders(tokenStore.token)
-            if (authHeaders.isNotEmpty()) {
-                webViewInstance?.loadUrl(targetUrl, authHeaders)
-            } else {
-                webViewInstance?.loadUrl(targetUrl)
-            }
-        }
+            override fun onPageFinished(view: WebView?, url: String?) {
+                super.onPageFinished(view, url)
+                progressBar?.visibility = View.GONE
 
-        fun handleStartTermux() {
-            if (!TermuxBridge.isTermuxInstalled(context)) {
-                coroutineScope.launch {
-                    snackbarHostState.showSnackbar("Termux not installed. Opening F-Droid...")
+                if (offlineView?.visibility != View.VISIBLE) {
+                    updateStatus(ConnectionStatus.CONNECTED)
+                    // Requirement 4 & 7: Start EngineService when panel loads successfully
+                    checkAndStartEngineService()
                 }
-                TermuxBridge.openFdroidTermux(context)
+            }
+
+            override fun onReceivedError(view: WebView?, request: WebResourceRequest?, error: WebResourceError?) {
+                super.onReceivedError(view, request, error)
+                if (request?.isForMainFrame == true) {
+                    showOffline()
+                }
+            }
+
+            override fun onReceivedHttpError(view: WebView?, request: WebResourceRequest?, errorResponse: WebResourceResponse?) {
+                super.onReceivedHttpError(view, request, errorResponse)
+                if (request?.isForMainFrame == true && (errorResponse?.statusCode ?: 200) >= 400) {
+                    if (errorResponse?.statusCode == 401) {
+                        Toast.makeText(this@MainActivity, "Unauthorized pairing token on 127.0.0.1", Toast.LENGTH_LONG).show()
+                    }
+                }
+            }
+        }
+
+        wv.webChromeClient = object : WebChromeClient() {
+            override fun onProgressChanged(view: WebView?, newProgress: Int) {
+                super.onProgressChanged(view, newProgress)
+                progressBar?.progress = newProgress
+                if (newProgress >= 100) {
+                    progressBar?.visibility = View.GONE
+                }
+            }
+
+            override fun onShowFileChooser(
+                webView: WebView?,
+                filePathCallback: ValueCallback<Array<Uri>>?,
+                fileChooserParams: FileChooserParams?
+            ): Boolean {
+                fileUploadCallback?.onReceiveValue(null)
+                fileUploadCallback = filePathCallback
+
+                if (ContextCompat.checkSelfPermission(this@MainActivity, Manifest.permission.CAMERA)
+                    != PackageManager.PERMISSION_GRANTED
+                ) {
+                    cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+                }
+
+                return try {
+                    val intent = fileChooserParams?.createIntent()
+                        ?: Intent(Intent.ACTION_GET_CONTENT).apply {
+                            type = "*/*"
+                            addCategory(Intent.CATEGORY_OPENABLE)
+                        }
+                    fileChooserLauncher.launch(intent)
+                    true
+                } catch (e: Exception) {
+                    fileUploadCallback?.onReceiveValue(null)
+                    fileUploadCallback = null
+                    false
+                }
+            }
+        }
+    }
+
+    private fun checkAndStartEngineService() {
+        if (hasStartedService) return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+                != PackageManager.PERMISSION_GRANTED
+            ) {
+                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
                 return
             }
+        }
+        doStartEngineService()
+    }
 
-            val started = TermuxBridge.startAiServeInTermux(context)
-            if (started) {
-                coroutineScope.launch {
-                    snackbarHostState.showSnackbar("Command \"ai serve\" dispatched to Termux. Reconnecting in 3s...")
-                }
-                connectionStatus = ConnectionStatus.CONNECTING
-                mainHandler.postDelayed({
-                    reloadEngine()
-                }, 3000)
+    private fun doStartEngineService() {
+        try {
+            val intent = Intent(this, EngineService::class.java)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(intent)
             } else {
-                coroutineScope.launch {
-                    snackbarHostState.showSnackbar("Could not send command to Termux. Please launch Termux manually.")
-                }
+                startService(intent)
             }
-        }
+            hasStartedService = true
+        } catch (_: Exception) {}
+    }
 
-        MaterialTheme(
-            colorScheme = darkColorScheme(
-                background = DarkBackground,
-                surface = DarkCard,
-                onBackground = DarkInk,
-                onSurface = DarkInk,
-                primary = DarkAcc,
-                onPrimary = DarkBackground
+    private fun buildOfflineView(): View {
+        val scroll = ScrollView(this).apply {
+            setBackgroundColor(Color.parseColor("#0B0E14"))
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
             )
-        ) {
-            Scaffold(
-                snackbarHost = { SnackbarHost(snackbarHostState) },
-                topBar = {
-                    TopAppBar(
-                        colors = TopAppBarDefaults.topAppBarColors(
-                            containerColor = DarkBackground,
-                            titleContentColor = DarkInk,
-                            actionIconContentColor = DarkInk
-                        ),
-                        title = {
-                            Column {
-                                Text(
-                                    text = "✦ Puppet Master",
-                                    fontSize = 17.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = DarkInk
-                                )
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.padding(top = 2.dp)
-                                ) {
-                                    val (statusColor, statusText) = when (connectionStatus) {
-                                        ConnectionStatus.CONNECTED -> DarkOk to "127.0.0.1:$currentPort (Active)"
-                                        ConnectionStatus.CONNECTING -> DarkWarn to "127.0.0.1:$currentPort (Connecting…)"
-                                        ConnectionStatus.OFFLINE -> DarkBad to "127.0.0.1:$currentPort (Offline)"
-                                    }
-                                    Box(
-                                        modifier = Modifier
-                                            .size(7.dp)
-                                            .background(statusColor, CircleShape)
-                                    )
-                                    Spacer(modifier = Modifier.width(5.dp))
-                                    Text(
-                                        text = statusText,
-                                        fontSize = 12.sp,
-                                        color = DarkDim
-                                    )
-                                }
-                            }
-                        },
-                        actions = {
-                            IconButton(onClick = { reloadEngine() }) {
-                                Icon(Icons.Default.Refresh, contentDescription = "Refresh Engine")
-                            }
-                            IconButton(onClick = { reloadEngine("/board") }) {
-                                Icon(Icons.Default.AutoAwesome, contentDescription = "Open Board")
-                            }
-                            IconButton(onClick = { handleStartTermux() }) {
-                                Icon(Icons.Default.Terminal, contentDescription = "Start Termux")
-                            }
-                            IconButton(onClick = { showConfigDialog = true }) {
-                                Icon(Icons.Default.Settings, contentDescription = "Settings")
-                            }
-                        }
-                    )
-                }
-            ) { innerPadding ->
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(innerPadding)
-                        .background(DarkBackground)
-                ) {
-                    // Page Loading Progress Bar
-                    if (connectionStatus == ConnectionStatus.CONNECTING && pageProgress in 1..99) {
-                        LinearProgressIndicator(
-                            progress = { pageProgress / 100f },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(3.dp),
-                            color = DarkAcc,
-                            trackColor = DarkLine,
-                        )
-                    }
+        }
 
-                    // WebView Container
-                    AndroidView(
-                        modifier = Modifier.fillMaxSize(),
-                        factory = { ctx ->
-                            WebView(ctx).apply {
-                                webViewInstance = this
-                                setBackgroundColor(0xFF0B0E14.toInt())
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            setPadding(dpToPx(24), dpToPx(32), dpToPx(24), dpToPx(32))
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT
+            )
+        }
 
-                                @SuppressLint("SetJavaScriptEnabled")
-                                settings.apply {
-                                    javaScriptEnabled = true
-                                    domStorageEnabled = true
-                                    databaseEnabled = true
-                                    allowFileAccess = false
-                                    allowContentAccess = true
-                                    mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
-                                    cacheMode = WebSettings.LOAD_DEFAULT
-                                    loadWithOverviewMode = true
-                                    useWideViewPort = true
-                                }
+        val warnIcon = ImageView(this).apply {
+            setImageResource(R.drawable.ic_warning)
+            setColorFilter(Color.parseColor("#D29922"))
+            layoutParams = LinearLayout.LayoutParams(dpToPx(56), dpToPx(56))
+        }
+        container.addView(warnIcon)
 
-                                webViewClient = object : WebViewClient() {
-                                    override fun shouldOverrideUrlLoading(
-                                        view: WebView?,
-                                        request: WebResourceRequest?
-                                    ): Boolean {
-                                        val uri = request?.url ?: return false
-                                        if (LoopbackGuard.isLoopback(uri)) {
-                                            return false // Loopback navigation allowed
-                                        }
+        val title = TextView(this).apply {
+            text = "Engine Not Reachable"
+            textSize = 20f
+            paint.isFakeBoldText = true
+            setTextColor(Color.parseColor("#E6EDF6"))
+            setPadding(0, dpToPx(16), 0, dpToPx(4))
+        }
+        container.addView(title)
 
-                                        // Non-loopback URL refused in WebView: open in system browser
-                                        try {
-                                            val extIntent = Intent(Intent.ACTION_VIEW, uri).apply {
-                                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                            }
-                                            context.startActivity(extIntent)
-                                            coroutineScope.launch {
-                                                snackbarHostState.showSnackbar(
-                                                    "Opening external link in system browser: $uri"
-                                                )
-                                            }
-                                        } catch (e: Exception) {
-                                            coroutineScope.launch {
-                                                snackbarHostState.showSnackbar("Cannot open link: ${e.message}")
-                                            }
-                                        }
-                                        return true
-                                    }
+        val hostText = TextView(this).apply {
+            text = "http://127.0.0.1:${tokenStore.port}"
+            textSize = 14f
+            setTextColor(Color.parseColor("#8B97A8"))
+            setPadding(0, 0, 0, dpToPx(20))
+        }
+        container.addView(hostText)
 
-                                    override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
-                                        super.onPageStarted(view, url, favicon)
-                                        connectionStatus = ConnectionStatus.CONNECTING
-                                    }
+        // Card instructions
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dpToPx(16), dpToPx(16), dpToPx(16), dpToPx(16))
+            background = GradientDrawable().apply {
+                setColor(Color.parseColor("#151A24"))
+                setStroke(dpToPx(1), Color.parseColor("#232A38"))
+                cornerRadius = dpToPx(14).toFloat()
+            }
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+        }
 
-                                    override fun onPageFinished(view: WebView?, url: String?) {
-                                        super.onPageFinished(view, url)
-                                        connectionStatus = ConnectionStatus.CONNECTED
-                                    }
+        val stepHeader = TextView(this).apply {
+            text = "EXACT NEXT STEPS"
+            textSize = 11f
+            paint.isFakeBoldText = true
+            setTextColor(Color.parseColor("#6EA8FE"))
+            letterSpacing = 0.08f
+            setPadding(0, 0, 0, dpToPx(10))
+        }
+        card.addView(stepHeader)
 
-                                    override fun onReceivedError(
-                                        view: WebView?,
-                                        request: WebResourceRequest?,
-                                        error: WebResourceError?
-                                    ) {
-                                        super.onReceivedError(view, request, error)
-                                        if (request?.isForMainFrame == true) {
-                                            connectionStatus = ConnectionStatus.OFFLINE
-                                        }
-                                    }
+        val step1Title = TextView(this).apply {
+            text = "1. Running locally on this phone (Termux):"
+            textSize = 13.5f
+            paint.isFakeBoldText = true
+            setTextColor(Color.parseColor("#E6EDF6"))
+        }
+        val step1Body = TextView(this).apply {
+            text = "Tap \"Start via Termux\" below, or open Termux and run \"ai serve\"."
+            textSize = 13f
+            setTextColor(Color.parseColor("#8B97A8"))
+            setPadding(0, dpToPx(2), 0, dpToPx(10))
+        }
+        card.addView(step1Title)
+        card.addView(step1Body)
 
-                                    override fun onReceivedHttpError(
-                                        view: WebView?,
-                                        request: WebResourceRequest?,
-                                        errorResponse: WebResourceResponse?
-                                    ) {
-                                        super.onReceivedHttpError(view, request, errorResponse)
-                                        if (request?.isForMainFrame == true && (errorResponse?.statusCode ?: 200) >= 400) {
-                                            if (errorResponse?.statusCode == 401) {
-                                                coroutineScope.launch {
-                                                    snackbarHostState.showSnackbar("Unauthorized pairing token on 127.0.0.1")
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
+        val step2Title = TextView(this).apply {
+            text = "2. Paired to your computer over USB:"
+            textSize = 13.5f
+            paint.isFakeBoldText = true
+            setTextColor(Color.parseColor("#E6EDF6"))
+        }
+        val step2Body = TextView(this).apply {
+            text = "Run: adb reverse tcp:${tokenStore.port} tcp:${tokenStore.port}\nEnsure \"ai serve\" is running on your computer."
+            textSize = 12f
+            setTextColor(Color.parseColor("#8B97A8"))
+            setPadding(0, dpToPx(2), 0, dpToPx(10))
+        }
+        card.addView(step2Title)
+        card.addView(step2Body)
 
-                                webChromeClient = object : WebChromeClient() {
-                                    override fun onProgressChanged(view: WebView?, newProgress: Int) {
-                                        super.onProgressChanged(view, newProgress)
-                                        pageProgress = newProgress
-                                    }
+        val step3Title = TextView(this).apply {
+            text = "3. Custom port or pairing token:"
+            textSize = 13.5f
+            paint.isFakeBoldText = true
+            setTextColor(Color.parseColor("#E6EDF6"))
+        }
+        val step3Body = TextView(this).apply {
+            text = "Tap \"Configure Connection\" to update loopback port or token."
+            textSize = 13f
+            setTextColor(Color.parseColor("#8B97A8"))
+            setPadding(0, dpToPx(2), 0, 0)
+        }
+        card.addView(step3Title)
+        card.addView(step3Body)
+        container.addView(card)
 
-                                    override fun onShowFileChooser(
-                                        webView: WebView?,
-                                        filePathCallback: ValueCallback<Array<Uri>>?,
-                                        fileChooserParams: FileChooserParams?
-                                    ): Boolean {
-                                        fileUploadCallback?.onReceiveValue(null)
-                                        fileUploadCallback = filePathCallback
+        // Action Buttons
+        val btnRetry = Button(this).apply {
+            text = "Retry Connection"
+            setTextColor(Color.parseColor("#0B0E14"))
+            paint.isFakeBoldText = true
+            background = GradientDrawable().apply {
+                setColor(Color.parseColor("#6EA8FE"))
+                cornerRadius = dpToPx(10).toFloat()
+            }
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                dpToPx(48)
+            ).apply { setMargins(0, dpToPx(20), 0, dpToPx(10)) }
+            setOnClickListener { reloadEngine() }
+        }
+        container.addView(btnRetry)
 
-                                        if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA)
-                                            != PackageManager.PERMISSION_GRANTED
-                                        ) {
-                                            cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
-                                        }
+        val btnTermux = Button(this).apply {
+            text = "Start via Termux"
+            setTextColor(Color.parseColor("#E6EDF6"))
+            background = GradientDrawable().apply {
+                setColor(Color.TRANSPARENT)
+                setStroke(dpToPx(1), Color.parseColor("#232A38"))
+                cornerRadius = dpToPx(10).toFloat()
+            }
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                dpToPx(48)
+            ).apply { setMargins(0, 0, 0, dpToPx(8)) }
+            setOnClickListener { handleStartTermux() }
+        }
+        container.addView(btnTermux)
 
-                                        return try {
-                                            val intent = fileChooserParams?.createIntent()
-                                                ?: Intent(Intent.ACTION_GET_CONTENT).apply {
-                                                    type = "*/*"
-                                                    addCategory(Intent.CATEGORY_OPENABLE)
-                                                }
-                                            fileChooserLauncher.launch(intent)
-                                            true
-                                        } catch (e: Exception) {
-                                            fileUploadCallback?.onReceiveValue(null)
-                                            fileUploadCallback = null
-                                            false
-                                        }
-                                    }
-                                }
+        val btnConfig = Button(this).apply {
+            text = "Configure Connection"
+            setTextColor(Color.parseColor("#8B97A8"))
+            background = null
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                dpToPx(40)
+            )
+            setOnClickListener { showConfigDialog() }
+        }
+        container.addView(btnConfig)
 
-                                reloadEngine()
-                            }
-                        }
-                    )
+        scroll.addView(container)
+        return scroll
+    }
 
-                    // Offline Error Screen with Exact Next Steps
-                    if (connectionStatus == ConnectionStatus.OFFLINE) {
-                        Surface(
-                            modifier = Modifier.fillMaxSize(),
-                            color = DarkBackground
-                        ) {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .verticalScroll(rememberScrollState())
-                                    .padding(24.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Warning,
-                                    contentDescription = "Engine Not Reachable",
-                                    tint = DarkWarn,
-                                    modifier = Modifier.size(56.dp)
-                                )
+    private fun reloadEngine(path: String = "/") {
+        offlineView?.visibility = View.GONE
+        webView?.visibility = View.VISIBLE
+        updateStatus(ConnectionStatus.CONNECTING)
 
-                                Spacer(modifier = Modifier.height(16.dp))
+        val targetUrl = LoopbackGuard.buildLoopbackUrl(tokenStore.port, path, tokenStore.token)
+        val authHeaders = LoopbackGuard.getAuthHeaders(tokenStore.token)
+        if (authHeaders.isNotEmpty()) {
+            webView?.loadUrl(targetUrl, authHeaders)
+        } else {
+            webView?.loadUrl(targetUrl)
+        }
+    }
 
-                                Text(
-                                    text = "Engine Not Reachable",
-                                    fontSize = 20.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = DarkInk
-                                )
+    private fun showOffline() {
+        webView?.visibility = View.GONE
+        offlineView?.visibility = View.VISIBLE
+        updateStatus(ConnectionStatus.OFFLINE)
+    }
 
-                                Text(
-                                    text = "http://127.0.0.1:$currentPort",
-                                    fontSize = 14.sp,
-                                    fontFamily = FontFamily.Monospace,
-                                    color = DarkDim,
-                                    modifier = Modifier.padding(top = 4.dp, bottom = 16.dp)
-                                )
+    private fun updateStatus(status: ConnectionStatus) {
+        val dot = statusDot ?: return
+        val text = statusSubtitle ?: return
 
-                                Card(
-                                    colors = CardDefaults.cardColors(containerColor = DarkCard),
-                                    shape = RoundedCornerShape(14.dp),
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .border(1.dp, DarkLine, RoundedCornerShape(14.dp))
-                                ) {
-                                    Column(modifier = Modifier.padding(16.dp)) {
-                                        Text(
-                                            text = "EXACT NEXT STEPS",
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = DarkAcc,
-                                            letterSpacing = 1.sp
-                                        )
-
-                                        Spacer(modifier = Modifier.height(10.dp))
-
-                                        Text(
-                                            text = "1. Running locally on this phone (Termux):",
-                                            fontWeight = FontWeight.SemiBold,
-                                            fontSize = 13.5.sp,
-                                            color = DarkInk
-                                        )
-                                        Text(
-                                            text = "Tap \"Start via Termux\" below, or open Termux and run \"ai serve\".",
-                                            fontSize = 13.sp,
-                                            color = DarkDim,
-                                            modifier = Modifier.padding(top = 2.dp, bottom = 10.dp)
-                                        )
-
-                                        Text(
-                                            text = "2. Paired to your computer over USB:",
-                                            fontWeight = FontWeight.SemiBold,
-                                            fontSize = 13.5.sp,
-                                            color = DarkInk
-                                        )
-                                        Text(
-                                            text = "Run: adb reverse tcp:$currentPort tcp:$currentPort\nEnsure \"ai serve\" is running on your computer.",
-                                            fontFamily = FontFamily.Monospace,
-                                            fontSize = 12.sp,
-                                            color = DarkDim,
-                                            modifier = Modifier.padding(top = 2.dp, bottom = 10.dp)
-                                        )
-
-                                        Text(
-                                            text = "3. Custom port or pairing token:",
-                                            fontWeight = FontWeight.SemiBold,
-                                            fontSize = 13.5.sp,
-                                            color = DarkInk
-                                        )
-                                        Text(
-                                            text = "Tap \"Configure Connection\" to update the loopback port or supply your token.",
-                                            fontSize = 13.sp,
-                                            color = DarkDim,
-                                            modifier = Modifier.padding(top = 2.dp)
-                                        )
-                                    }
-                                }
-
-                                Spacer(modifier = Modifier.height(24.dp))
-
-                                Button(
-                                    onClick = { reloadEngine() },
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(50.dp),
-                                    shape = RoundedCornerShape(10.dp),
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = DarkAcc,
-                                        contentColor = DarkBackground
-                                    )
-                                ) {
-                                    Icon(Icons.Default.Refresh, contentDescription = null)
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text("Retry Connection", fontWeight = FontWeight.Bold)
-                                }
-
-                                Spacer(modifier = Modifier.height(10.dp))
-
-                                OutlinedButton(
-                                    onClick = { handleStartTermux() },
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(50.dp),
-                                    shape = RoundedCornerShape(10.dp),
-                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = DarkInk),
-                                    border = ButtonDefaults.outlinedButtonBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(DarkLine))
-                                ) {
-                                    Icon(Icons.Default.Terminal, contentDescription = null, tint = DarkInk)
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text("Start via Termux")
-                                }
-
-                                Spacer(modifier = Modifier.height(8.dp))
-
-                                TextButton(
-                                    onClick = { showConfigDialog = true },
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Icon(Icons.Default.Settings, contentDescription = null, tint = DarkDim)
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Configure Connection", color = DarkDim)
-                                }
-                            }
-                        }
-                    }
-
-                    // Configuration Dialog
-                    if (showConfigDialog) {
-                        var tempPort by remember { mutableStateOf(currentPort.toString()) }
-                        var tempToken by remember { mutableStateOf(tokenStore.token) }
-                        var showTokenPassword by remember { mutableStateOf(false) }
-
-                        AlertDialog(
-                            containerColor = DarkCard,
-                            shape = RoundedCornerShape(16.dp),
-                            onDismissRequest = { showConfigDialog = false },
-                            title = {
-                                Text(
-                                    "Engine Configuration",
-                                    fontSize = 18.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = DarkInk
-                                )
-                            },
-                            text = {
-                                Column {
-                                    Text(
-                                        "Configure loopback port and secure pairing token. Protected via EncryptedSharedPreferences.",
-                                        fontSize = 13.sp,
-                                        color = DarkDim
-                                    )
-
-                                    Spacer(modifier = Modifier.height(16.dp))
-
-                                    OutlinedTextField(
-                                        value = tempPort,
-                                        onValueChange = { tempPort = it.filter { ch -> ch.isDigit() } },
-                                        label = { Text("Port (Default: 8765)") },
-                                        singleLine = true,
-                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                        modifier = Modifier.fillMaxWidth(),
-                                        colors = OutlinedTextFieldDefaults.colors(
-                                            focusedBorderColor = DarkAcc,
-                                            unfocusedBorderColor = DarkLine,
-                                            focusedLabelColor = DarkAcc,
-                                            unfocusedLabelColor = DarkDim,
-                                            focusedTextColor = DarkInk,
-                                            unfocusedTextColor = DarkInk
-                                        )
-                                    )
-
-                                    Spacer(modifier = Modifier.height(12.dp))
-
-                                    OutlinedTextField(
-                                        value = tempToken,
-                                        onValueChange = { tempToken = it },
-                                        label = { Text("Pairing Token (AI_SERVE_TOKEN)") },
-                                        singleLine = true,
-                                        visualTransformation = if (showTokenPassword) VisualTransformation.None else PasswordVisualTransformation(),
-                                        trailingIcon = {
-                                            IconButton(onClick = { showTokenPassword = !showTokenPassword }) {
-                                                Icon(
-                                                    imageVector = if (showTokenPassword) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                                                    contentDescription = "Toggle token visibility",
-                                                    tint = DarkDim
-                                                )
-                                            }
-                                        },
-                                        modifier = Modifier.fillMaxWidth(),
-                                        colors = OutlinedTextFieldDefaults.colors(
-                                            focusedBorderColor = DarkAcc,
-                                            unfocusedBorderColor = DarkLine,
-                                            focusedLabelColor = DarkAcc,
-                                            unfocusedLabelColor = DarkDim,
-                                            focusedTextColor = DarkInk,
-                                            unfocusedTextColor = DarkInk
-                                        )
-                                    )
-
-                                    if (hasToken) {
-                                        Text(
-                                            text = "Masked Token: ${tokenStore.getMaskedToken()}",
-                                            fontSize = 11.sp,
-                                            fontFamily = FontFamily.Monospace,
-                                            color = DarkOk,
-                                            modifier = Modifier.padding(top = 4.dp)
-                                        )
-                                    }
-                                }
-                            },
-                            confirmButton = {
-                                Button(
-                                    onClick = {
-                                        val portInt = tempPort.toIntOrNull() ?: TokenStore.DEFAULT_PORT
-                                        tokenStore.port = portInt
-                                        tokenStore.token = tempToken
-                                        currentPort = tokenStore.port
-                                        hasToken = tokenStore.hasToken()
-                                        showConfigDialog = false
-                                        reloadEngine()
-                                    },
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = DarkAcc,
-                                        contentColor = DarkBackground
-                                    )
-                                ) {
-                                    Text("Save & Connect", fontWeight = FontWeight.Bold)
-                                }
-                            },
-                            dismissButton = {
-                                Row {
-                                    if (hasToken) {
-                                        TextButton(
-                                            onClick = {
-                                                tokenStore.clearToken()
-                                                tempToken = ""
-                                                hasToken = false
-                                                showConfigDialog = false
-                                                reloadEngine()
-                                            }
-                                        ) {
-                                            Text("Clear Token", color = DarkBad)
-                                        }
-                                    }
-                                    TextButton(onClick = { showConfigDialog = false }) {
-                                        Text("Cancel", color = DarkDim)
-                                    }
-                                }
-                            }
-                        )
-                    }
-                }
+        when (status) {
+            ConnectionStatus.CONNECTED -> {
+                (dot.background as? GradientDrawable)?.setColor(Color.parseColor("#3FB950"))
+                text.text = "127.0.0.1:${tokenStore.port} (Active)"
+            }
+            ConnectionStatus.CONNECTING -> {
+                (dot.background as? GradientDrawable)?.setColor(Color.parseColor("#D29922"))
+                text.text = "127.0.0.1:${tokenStore.port} (Connecting…)"
+            }
+            ConnectionStatus.OFFLINE -> {
+                (dot.background as? GradientDrawable)?.setColor(Color.parseColor("#F85149"))
+                text.text = "127.0.0.1:${tokenStore.port} (Offline)"
             }
         }
+    }
+
+    private fun handleStartTermux() {
+        if (!TermuxBridge.isTermuxInstalled(this)) {
+            Toast.makeText(this, "Termux not installed. Opening F-Droid...", Toast.LENGTH_SHORT).show()
+            TermuxBridge.openFdroidTermux(this)
+            return
+        }
+
+        val started = TermuxBridge.startAiServeInTermux(this)
+        if (started) {
+            Toast.makeText(this, "Command \"ai serve\" sent to Termux. Reconnecting...", Toast.LENGTH_SHORT).show()
+            updateStatus(ConnectionStatus.CONNECTING)
+            mainHandler.postDelayed({ reloadEngine() }, 3000)
+        } else {
+            Toast.makeText(this, "Could not send command to Termux. Please launch Termux manually.", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun showConfigDialog() {
+        val layout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dpToPx(24), dpToPx(16), dpToPx(24), dpToPx(8))
+        }
+
+        val hintText = TextView(this).apply {
+            text = "Configure loopback port and secure pairing token. Protected via EncryptedSharedPreferences."
+            textSize = 13f
+            setTextColor(Color.parseColor("#8B97A8"))
+            setPadding(0, 0, 0, dpToPx(12))
+        }
+        layout.addView(hintText)
+
+        val portInput = EditText(this).apply {
+            hint = "Port (Default: 8765)"
+            setText(tokenStore.port.toString())
+            inputType = InputType.TYPE_CLASS_NUMBER
+            setTextColor(Color.parseColor("#E6EDF6"))
+            setHintTextColor(Color.parseColor("#8B97A8"))
+        }
+        layout.addView(portInput)
+
+        val tokenInput = EditText(this).apply {
+            hint = "Pairing Token (AI_SERVE_TOKEN)"
+            setText(tokenStore.token)
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            setTextColor(Color.parseColor("#E6EDF6"))
+            setHintTextColor(Color.parseColor("#8B97A8"))
+        }
+        layout.addView(tokenInput)
+
+        if (tokenStore.hasToken()) {
+            val maskedText = TextView(this).apply {
+                text = "Masked Token: ${tokenStore.getMaskedToken()}"
+                textSize = 12f
+                setTextColor(Color.parseColor("#3FB950"))
+                setPadding(0, dpToPx(6), 0, 0)
+            }
+            layout.addView(maskedText)
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle("Engine Configuration")
+            .setView(layout)
+            .setPositiveButton("Save & Connect") { _, _ ->
+                val p = portInput.text.toString().toIntOrNull() ?: TokenStore.DEFAULT_PORT
+                tokenStore.port = p
+                tokenStore.token = tokenInput.text.toString().trim()
+                reloadEngine()
+            }
+            .setNeutralButton(if (tokenStore.hasToken()) "Clear Token" else null) { _, _ ->
+                tokenStore.clearToken()
+                reloadEngine()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun dpToPx(dp: Int): Int {
+        return (dp * resources.displayMetrics.density).toInt()
     }
 
     override fun onDestroy() {
         mainHandler.removeCallbacksAndMessages(null)
-        webViewInstance?.destroy()
+        webView?.destroy()
         super.onDestroy()
     }
 }

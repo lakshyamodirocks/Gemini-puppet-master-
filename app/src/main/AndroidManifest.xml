@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- Allowed permissions per specification -->
+    <!-- Allowed permissions strictly per specification -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="com.termux.permission.RUN_COMMAND" />
 
@@ -15,7 +15,7 @@
         android:name="android.hardware.camera"
         android:required="false" />
 
-    <!-- Queries for Termux while engine runs in Termux and external browser intents -->
+    <!-- Queries for Termux and external browser intents -->
     <queries>
         <package android:name="com.termux" />
         <intent>
@@ -45,6 +45,30 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <activity
+            android:name=".ShareActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+        </activity>
+
+        <receiver
+            android:name=".EventReceiver"
+            android:exported="false" />
+
+        <service
+            android:name=".EngineService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Keeps this phone's local AI engine reachable on 127.0.0.1 while the app is open" />
+        </service>
 
     </application>
 

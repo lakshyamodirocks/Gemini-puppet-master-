@@ -76,6 +76,38 @@ object TermuxBridge {
     }
 
     /**
+     * Sends intent to Termux's RunCommandService to execute `ai wake`.
+     */
+    fun wakeAiInTermux(context: Context): Boolean {
+        if (!isTermuxInstalled(context)) return false
+
+        val intent = Intent().apply {
+            setClassName(TERMUX_PACKAGE_NAME, TERMUX_RUN_COMMAND_SERVICE)
+            action = ACTION_RUN_COMMAND
+            putExtra(EXTRA_RUN_COMMAND_PATH, "/data/data/com.termux/files/usr/bin/bash")
+            putExtra(EXTRA_RUN_COMMAND_ARGUMENTS, arrayOf("-l", "-c", "ai wake"))
+            putExtra(EXTRA_RUN_COMMAND_WORKDIR, "/data/data/com.termux/files/home")
+            putExtra(EXTRA_RUN_COMMAND_BACKGROUND, true)
+        }
+
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
+            true
+        } catch (_: Exception) {
+            try {
+                context.startService(intent)
+                true
+            } catch (_: Exception) {
+                false
+            }
+        }
+    }
+
+    /**
      * Opens F-Droid to install Termux.
      */
     fun openFdroidTermux(context: Context) {
