@@ -1,0 +1,6 @@
+{
+  "name": "Puppet Master",
+  "description": "Puppet Master Android shell for Aasmaan local AI engine on 127.0.0.1",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

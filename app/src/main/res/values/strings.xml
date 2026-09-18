@@ -1,0 +1,28 @@
+<resources>
+    <string name="app_name">Puppet Master</string>
+    <string name="app_tagline">Shell for Aasmaan on 127.0.0.1</string>
+    <string name="engine_connecting">Connecting to engine on 127.0.0.1:%1$d…</string>
+    <string name="engine_not_running_title">Engine Not Reachable</string>
+    <string name="engine_not_running_msg">Puppet Master could not connect to the Aasmaan engine on 127.0.0.1:%1$d.\n\nExact next steps:\n1. If running locally in Termux on this phone, tap \"Start via Termux\" below, or open Termux and run:\n   ai serve\n\n2. If connected to your PC over USB, run:\n   adb reverse tcp:%1$d tcp:%1$d\n   and verify \"ai serve\" is running on your computer.\n\n3. If your engine uses a custom port or pairing token, tap \"Configure Connection\".</string>
+    <string name="btn_retry">Retry Connection</string>
+    <string name="btn_start_termux">Start via Termux</string>
+    <string name="btn_configure">Configure Connection</string>
+    <string name="termux_not_installed_title">Termux Not Installed</string>
+    <string name="termux_not_installed_msg">Termux was not found on this device.\n\nNext step:\nInstall Termux from F-Droid (not Google Play Store) to run the local AI engine on your phone.</string>
+    <string name="btn_install_termux">Open F-Droid for Termux</string>
+    <string name="termux_start_sent">Command \"ai serve\" sent to Termux. Checking connection in 3 seconds…</string>
+    <string name="token_title">Engine Configuration</string>
+    <string name="token_prompt">Set the loopback port and secure pairing token. The token is encrypted in Android Keystore and only sent to 127.0.0.1.</string>
+    <string name="port_label">Port (Default: 8765)</string>
+    <string name="token_label">Pairing Token (AI_SERVE_TOKEN)</string>
+    <string name="save_and_reconnect">Save &amp; Reconnect</string>
+    <string name="cancel">Cancel</string>
+    <string name="clear_token">Clear Stored Token</string>
+    <string name="camera_permission_rationale">Camera permission is required to capture photos for attachment.</string>
+    <string name="menu_refresh">Refresh</string>
+    <string name="menu_settings">Settings</string>
+    <string name="menu_board">Open Whiteboard</string>
+    <string name="menu_termux">Start Engine in Termux</string>
+    <string name="status_connected">Connected to engine on 127.0.0.1:%1$d</string>
+    <string name="external_link_opened">Opening external link in system browser:\n%1$s</string>
+</resources>
